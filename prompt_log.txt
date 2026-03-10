@@ -1,6 +1,29 @@
-## Student Name:
-## Student ID: 
+Prompt 1 (Ambiguity Check)
+Prompt:
+"For EECS 4312 Lab 8 Task A, should the recommender return maximal free intervals, or split them into fixed-size blocks equal to the meeting duration? Also confirm handling of unsorted/overlapping busy intervals and candidate window intersection with working hours."
 
-Prompt #1: {}
-Response #1: {}
---------------------------------------------------
+Short Response Summary:
+The implementation should return free intervals (not fixed-size blocks), each long enough for the required duration. Busy intervals must be normalized (sorted + merged). If a candidate window is provided, only consider the intersection with working hours.
+
+Decision:
+Use maximal free intervals as returned slots; enforce constraints via validation; normalize busy intervals before computing availability.
+
+Prompt 2 (Implementation Request)
+Prompt:
+"Implement solution.py for an Appointment Slot Recommender that accepts working hours, busy intervals, meeting duration, optional buffer time, and optional candidate window. Ensure deterministic chronological output and robust handling of overlapping/unsorted busy intervals."
+
+Short Response Summary:
+Implemented a readable deterministic algorithm: validate inputs, convert times to minutes, clip to scheduling window, expand busy intervals by buffer, merge overlaps, compute free gaps, and return only gaps meeting the duration requirement.
+
+Decision:
+Keep implementation simple and explicit with helper functions for parsing/formatting times and interval merging.
+
+Prompt 3 (Tests / Validation)
+Prompt:
+"Create tests.py with executable tests linked to constraints and acceptance criteria, including edge cases (no gaps, long duration, overlapping/unsorted busy intervals, candidate window too small, and buffer eliminating a slot), then run tests."
+
+Short Response Summary:
+Added unit tests covering AC1-AC6 plus required edge cases, with comments mapping tests to constraints. Test run confirms deterministic and constraint-compliant behavior.
+
+Decision:
+Use Python unittest and assert exact ordered slot outputs for deterministic validation.

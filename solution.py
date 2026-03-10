@@ -1,128 +1,108 @@
-## Student Name:
-## Student ID:
+"""Appointment Slot Recommender for EECS 4312 Lab 8 Task A."""
 
-"""
-Task A: Appointment Timeslot Recommender (Stub)
+from __future__ import annotations
 
-In this lab, you will design and implement an Appointment Slot Recommender using an LLM assistant
-as your primary programming collaborator.
-
-You are asked to implement a Python module that recommends available meeting slots within a
-defined working window.
-
-The system must:
-  • Accept working hours (start and end time).
-  • Accept a list of existing busy intervals.
-  • Accept a required meeting duration.
-  • Accept an optional buffer time between meetings.
-  • Optionally restrict suggestions to a candidate time window.
-  • Return chronologically ordered appointment slots that satisfy all constraints.
-
-The system must ensure that:
-  • Suggested slots fall within working hours.
-  • Suggested slots do not overlap busy intervals.
-  • Buffer time is respected when evaluating availability.
-  • Output ordering is deterministic under identical inputs.
-
-The module must preserve the following invariants:
-  • Returned slots must be at least as long as the required duration.
-  • No returned slot may violate buffer constraints.
-  • The returned list must reflect the current system state.
-
-The system must correctly handle non-trivial scenarios such as:
-  • Adjacent busy intervals.
-  • Very small gaps between meetings.
-  • Buffers eliminating otherwise valid availability.
-  • Overlapping or unsorted busy intervals.
-  • A meeting duration longer than any available gap.
-  • No availability within the working window.
-
-Output:
-  The output consists of the next N valid appointment suggestions in chronological order.
-  Behavior must be deterministic under ties (if any).
-
-See the lab handout for full requirements.
-"""
-
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, time
 from typing import List, Optional, Tuple
 
 
-# ---------------- Data Models ----------------
+TimeInterval = Tuple[str, str]
+MinutesInterval = Tuple[int, int]
 
-@dataclass(frozen=True)
-class TimeWindow:
+
+def _to_minutes(time_str: str) -> int:
+    """Convert HH:MM string to minutes from midnight."""
+    hour_str, minute_str = time_str.split(":")
+    hour = int(hour_str)
+    minute = int(minute_str)
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        raise ValueError(f"Invalid time format: {time_str}")
+    return hour * 60 + minute
+
+
+def _to_time_str(total_minutes: int) -> str:
+    """Convert minutes from midnight to HH:MM string."""
+    hour = total_minutes // 60
+    minute = total_minutes % 60
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _validate_interval(interval: TimeInterval, name: str) -> MinutesInterval:
+    start, end = interval
+    start_m = _to_minutes(start)
+    end_m = _to_minutes(end)
+    if start_m >= end_m:
+        raise ValueError(f"{name} start time must be before end time")
+    return start_m, end_m
+
+
+def _merge_intervals(intervals: List[MinutesInterval]) -> List[MinutesInterval]:
+    """Merge overlapping or touching intervals."""
+    if not intervals:
+        return []
+    ordered = sorted(intervals, key=lambda item: item[0])
+    merged: List[MinutesInterval] = [ordered[0]]
+    for start, end in ordered[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def recommend_appointment_slots(
+    working_hours: TimeInterval,
+    busy_intervals: List[TimeInterval],
+    meeting_duration: int,
+    buffer_time: int = 0,
+    candidate_window: Optional[TimeInterval] = None,
+) -> List[TimeInterval]:
     """
-    A daily time window.
-    Assumption (unless stated otherwise in handout): non-wrapping window where start < end.
+    Recommend available appointment slots as free intervals.
+
+    Each returned interval is at least meeting_duration minutes long and
+    does not overlap busy intervals (including optional buffer).
     """
-    start: time
-    end: time
+    # C1
+    work_start, work_end = _validate_interval(working_hours, "Working hours")
 
+    # C4
+    if meeting_duration <= 0:
+        raise ValueError("Meeting duration must be greater than zero")
 
-@dataclass(frozen=True)
-class BusyInterval:
-    """
-    A busy interval on the given day.
-    Invariant: start < end
-    """
-    start: time
-    end: time
+    # C5
+    if buffer_time < 0:
+        raise ValueError("Buffer time must be zero or positive")
 
+    window_start, window_end = work_start, work_end
+    if candidate_window is not None:
+        cand_start, cand_end = _validate_interval(candidate_window, "Candidate window")
+        window_start = max(window_start, cand_start)
+        window_end = min(window_end, cand_end)
 
-@dataclass(frozen=True)
-class Slot:
-    """
-    A recommended appointment slot.
+    if window_start >= window_end:
+        return []
 
-    start_time is a time-of-day within the working window.
-    Deterministic ordering: sort by start_time ascending.
-    """
-    start_time: time
+    expanded_busy: List[MinutesInterval] = []
+    for index, interval in enumerate(busy_intervals):
+        # C2
+        busy_start, busy_end = _validate_interval(interval, f"Busy interval {index}")
+        start = max(window_start, busy_start - buffer_time)
+        end = min(window_end, busy_end + buffer_time)
+        if start < end:
+            expanded_busy.append((start, end))
 
+    normalized_busy = _merge_intervals(expanded_busy)
 
-class InfeasibleSchedule(Exception):
-    """Raised when no valid slots can be produced (if required by handout)."""
-    pass
+    free_slots: List[MinutesInterval] = []
+    cursor = window_start
+    for busy_start, busy_end in normalized_busy:
+        if cursor < busy_start and busy_start - cursor >= meeting_duration:
+            free_slots.append((cursor, busy_start))
+        cursor = max(cursor, busy_end)
 
+    if window_end - cursor >= meeting_duration:
+        free_slots.append((cursor, window_end))
 
-# ---------------- Core Function ----------------
-
-def suggest_slots(
-    day: date,
-    working_hours: TimeWindow,
-    busy_intervals: List[BusyInterval],
-    duration: timedelta,
-    n: int,
-    buffer: timedelta = timedelta(0),
-    candidate_window: Optional[TimeWindow] = None
-) -> List[Slot]:
-    """
-    Suggest up to the next n valid appointment slots (start times) for the given day.
-
-    Args:
-        day: the calendar day for which to suggest slots.
-        working_hours: the allowed working window for meetings (start < end).
-        busy_intervals: list of busy time intervals (may be overlapping / unsorted).
-        duration: required meeting length (must be > 0).
-        n: maximum number of slot suggestions to return (n >= 0).
-        buffer: optional buffer time required between meetings (buffer >= 0).
-        candidate_window: optional extra restriction on suggestions (must lie within this window too).
-
-    Returns:
-        A list of Slot objects, sorted by start_time ascending, deterministic under identical inputs.
-        If no suitable time slots are available, return an empty list.
-
-    Notes:
-        - Suggested slots must fall within working_hours (and candidate_window if provided).
-        - Suggested slots must not overlap busy_intervals, considering buffer time.
-        - You are free to choose internal representation; inputs use time-of-day.
-        - See lab handout for required slot granularity (e.g., 5-min/15-min steps), if any.
-    """
-
-    ##################################################################
-    # TODO: Implement as per lab handout requirements and constraints.
-    ##################################################################
-    
-    raise NotImplementedError("suggest_slots has not been implemented yet")
+    # C8: already chronological because of sorted merged intervals and forward cursor.
+    return [(_to_time_str(start), _to_time_str(end)) for start, end in free_slots]
